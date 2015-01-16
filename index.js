@@ -2,8 +2,6 @@
 var voxel = require('voxel')
 var ray = require('voxel-raycast')
 var control = require('voxel-controls')
-var Stats = require('./lib/stats')
-var Detector = require('./lib/detector')
 var inherits = require('inherits')
 var path = require('path')
 var EventEmitter = require('events').EventEmitter
@@ -16,7 +14,6 @@ var regionChange = require('voxel-region-change')
 var physical = require('voxel-physicals')
 var pin = require('pin-it')
 var tic = require('tic')()
-var createShell = require('gl-now')
 var ndarray = require('ndarray')
 var isndarray = require('isndarray')
 
@@ -28,7 +25,8 @@ require('voxel-shader')
 require('voxel-mesher')
 require('game-shell-fps-camera')
 
-var createInputs = require('./inputs')
+var createInputs = require('./lib/inputs')
+var createContainer = require('./lib/container')
 
 module.exports = Game
 
@@ -45,7 +43,11 @@ function Game(opts) {
   var self = this
   if (!opts) opts = {}
   if (opts.pluginOpts && opts.pluginOpts['voxel-engine']) opts = extend(opts, opts.pluginOpts['voxel-engine'])
-  if (process.browser && this.notCapable(opts)) return
+  
+  // create container submodule
+  this.container = createContainer( this, opts )
+  if (process.browser && this.container.notCapable(opts)) return
+  
 
   // is this a client or a headless server
   this.isClient = Boolean( (typeof opts.isClient !== 'undefined') ? opts.isClient : process.browser )
@@ -54,7 +56,6 @@ function Game(opts) {
   this.generateChunks = opts.generateChunks
   this.setConfigurablePositions(opts)
   this.configureChunkLoading(opts)
-  this.setDimensions(opts)
   Object.defineProperty(this, 'THREE', {get:function() { throw new Error('voxel-engine "THREE property removed') }})
   this.vector = vector
   this.glMatrix = glMatrix
@@ -68,7 +69,8 @@ function Game(opts) {
   this.chunkDistance = opts.chunkDistance || 2
   this.removeDistance = opts.removeDistance || this.chunkDistance + 1
   
-  this.skyColor = opts.skyColor || 0xBFD1E5
+  opts.skyColor = opts.skyColor || 0xBFD1E5
+  this.skyColor = opts.skyColor
   this.antialias = opts.antialias
   this.playerHeight = opts.playerHeight || 1.62
   this.meshType = opts.meshType || 'surfaceMesh'
@@ -89,24 +91,23 @@ function Game(opts) {
   // used to be a three.js PerspectiveCamera set by voxel-view; see also basic-camera but API not likely compatible (TODO: make it compatible?)
   Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
 
-  // the game-shell
-  var shellOpts = shellOpts || {}
-  shellOpts.clearColor = [
-    (this.skyColor >> 16) / 255.0,
-    ((this.skyColor >> 8) & 0xff) / 255.0,
-    (this.skyColor & 0xff) / 255.0,
-    1.0]
-  shellOpts.pointerLock = opts.pointerLock !== undefined ? opts.pointerLock : true
-  shellOpts.element = this.createContainer(opts)
-  var shell = createShell(shellOpts)
-
-  shell.on('gl-error', function(err) {
-    // normally not reached; notCapable() checks for WebGL compatibility first
-    document.body.appendChild(document.createTextNode('Fatal WebGL error: ' + err))
-  })
-
-  this.shell = shell
-
+  
+  
+  // container/shell setup
+  
+  this.container.createShell( opts )
+  // reference to shell, hopefylly can someday abstract this?
+  this.shell = this.container.getShell()
+  
+  //  redirect APIs that are now encapsulated in container..
+  this.setDimensions = function(){ throw new Error('voxel-engine "setDimensions" method removed') }
+  this.appendTo = function(){ throw new Error('voxel-engine "appendTo" method moved to container module') }
+  this.notCapable = function(){ throw new Error('voxel-engine "notCapable" method moved to container module') }
+  this.notCapableMessage = function(){ throw new Error('voxel-engine "notCapableMessage" method moved to container module') }
+  
+  
+  
+  
   // setup plugins
   var plugins = createPlugins(this, {require: function(name) {
     // we provide the built-in plugins ourselves; otherwise check caller's require, if any
@@ -366,10 +367,6 @@ Game.prototype.createAdjacent = function(hit, val) {
   this.createBlock(hit.adjacent, val)
 }
 
-Game.prototype.appendTo = function (element) {
-  // no-op; game-shell to append itself
-}
-
 // # Defaults/options parsing
 
 Game.prototype.gravity = [0, -0.0000036, 0]
@@ -392,59 +389,6 @@ Game.prototype.setConfigurablePositions = function(opts) {
   this.worldOrigin = wo || [0, 0, 0]
 }
 
-Game.prototype.createContainer = function(opts) {
-  if (opts.container) return opts.container
-
-  // based on game-shell makeDefaultContainer()
-  var container = document.createElement("div")
-  container.tabindex = 1
-  container.style.position = "absolute"
-  container.style.left = "0px"
-  container.style.right = "0px"
-  container.style.top = "0px"
-  container.style.bottom = "0px"
-  container.style.height = "100%"
-  container.style.overflow = "hidden"
-  document.body.appendChild(container)
-  document.body.style.overflow = "hidden" //Prevent bounce
-  document.body.style.height = "100%"
-  return container
-}
-
-Game.prototype.setDimensions = function(opts) {
-  if (opts.container) this.container = opts.container
-  if (opts.container && opts.container.clientHeight) {
-    this.height = opts.container.clientHeight
-  } else {
-    this.height = typeof window === "undefined" ? 1 : window.innerHeight
-  }
-  if (opts.container && opts.container.clientWidth) {
-    this.width = opts.container.clientWidth
-  } else {
-    this.width = typeof window === "undefined" ? 1 : window.innerWidth
-  }
-}
-
-Game.prototype.notCapable = function(opts) {
-  var self = this
-  if( !Detector().webgl ) {
-    if (!this.reportedNotCapable) document.body.appendChild(self.notCapableMessage())
-    this.reportedNotCapable = true // only once
-    return true
-  }
-  return false
-}
-
-Game.prototype.notCapableMessage = function() {
-  var wrapper = document.createElement('div')
-  wrapper.className = "errorMessage"
-  var a = document.createElement('a')
-  a.title = "You need WebGL and Pointer Lock (Chrome 23/Firefox 14) to play this game. Click here for more information."
-  a.innerHTML = a.title
-  a.href = "http://get.webgl.org"
-  wrapper.appendChild(a)
-  return wrapper
-}
 
 // # Physics/collision related methods
 
@@ -495,14 +439,6 @@ Game.prototype.collideTerrain = function(other, bbox, vec, resting) {
   })
 }
 
-// # Three.js specific methods
-
-Game.prototype.addStats = function() {
-  stats = new Stats()
-  stats.domElement.style.position  = 'absolute'
-  stats.domElement.style.bottom  = '0px'
-  document.body.appendChild( stats.domElement )
-}
 
 // # Chunk related methods
 
