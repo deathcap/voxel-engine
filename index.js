@@ -94,17 +94,19 @@ function Game(opts) {
   
   
   // container/shell setup
-  
   this.container.createShell( opts )
-  // reference to shell, hopefylly can someday abstract this?
+  
+  // reference to shell, hopefully can someday abstract this?
   this.shell = this.container.getShell()
   
   //  redirect APIs that are now encapsulated in container..
-  this.setDimensions = function(){ throw new Error('voxel-engine "setDimensions" method removed') }
-  this.appendTo = function(){ throw new Error('voxel-engine "appendTo" method moved to container module') }
-  this.notCapable = function(){ throw new Error('voxel-engine "notCapable" method moved to container module') }
-  this.notCapableMessage = function(){ throw new Error('voxel-engine "notCapableMessage" method moved to container module') }
-  
+  Object.defineProperty(this, 'setDimensions', {get:function() { throw new Error('voxel-engine "setDimensions" removed') }})
+  Object.defineProperty(this, 'createContainer', {get:function() { throw new Error('voxel-engine "createContainer" moved to container module') }})
+  Object.defineProperty(this, 'appendTo', {get:function() { throw new Error('voxel-engine "appendTo" moved to container module') }})
+  Object.defineProperty(this, 'notCapable', {get:function() { throw new Error('voxel-engine "notCapable" moved to container module') }})
+  Object.defineProperty(this, 'notCapableMessage', {get:function() { throw new Error('voxel-engine "notCapableMessage" moved to container module') }})
+  Object.defineProperty(this, 'height', {get:function() { throw new Error('voxel-engine "height" removed') }})
+  Object.defineProperty(this, 'width', {get:function() { throw new Error('voxel-engine "width" removed') }})
   
   
   
