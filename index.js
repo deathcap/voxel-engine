@@ -171,7 +171,6 @@ function Game(opts) {
   this.buttons = this.inputs.tempGetButtons()
   // Input-related removal warnings:
   Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
-  Object.defineProperty(this, 'interact', {get:function() { throw new Error('voxel-engine "interact" property removed') }})
 
   
   
