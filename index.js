@@ -27,6 +27,7 @@ require('game-shell-fps-camera')
 
 var createInputs = require('./lib/inputs')
 var createContainer = require('./lib/container')
+var createRendering = require('./lib/rendering')
 
 module.exports = Game
 
@@ -69,29 +70,35 @@ function Game(opts) {
   this.chunkDistance = opts.chunkDistance || 2
   this.removeDistance = opts.removeDistance || this.chunkDistance + 1
   
-  opts.skyColor = opts.skyColor || 0xBFD1E5
-  this.skyColor = opts.skyColor
-  this.antialias = opts.antialias
-  this.playerHeight = opts.playerHeight || 1.62
-  this.meshType = opts.meshType || 'surfaceMesh'
-
-  // was a 'voxel' module meshers object, now using voxel-mesher(ao-mesher)
+  
+  
+  // set up rendering
+  this.rendering = createRendering(this, opts)
+  
+  // warn about many removed or NYI rendering properties:
   Object.defineProperty(this, 'mesher', {get:function() { throw new Error('voxel-engine "mesher" property removed') }})
+  Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
+  Object.defineProperty(this, 'view', {get:function() { throw new Error('voxel-engine "view" property removed') }})
+  Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
+  Object.defineProperty(this, 'render', {get:function() { throw new Error('voxel-engine "render" method removed') }})
+  Object.defineProperty(this, 'addMarker', {get:function() { throw new Error('voxel-engine "addMarker" is NYI') }})
+  Object.defineProperty(this, 'addAABBMarker', {get:function() { throw new Error('voxel-engine "addAABBMarker" is NYI') }})
+  Object.defineProperty(this, 'addVoxelMarker', {get:function() { throw new Error('voxel-engine "addVoxelMarker" is NYI') }})
+  Object.defineProperty(this, 'skyColor', {get:function() { throw new Error('voxel-engine "skyColor" has moved into rendering module') }})
+  Object.defineProperty(this, 'antialias', {get:function() { throw new Error('voxel-engine "antialias" has moved into rendering module') }})
+  Object.defineProperty(this, 'meshType', {get:function() { throw new Error('voxel-engine "meshType" has moved into rendering module') }})
+  
+  // redirects for game properties (TODO: remove/abstract these)
+  this.cameraPosition = this.rendering.cameraPosition
+  this.cameraVector = this.rendering.cameraVector
+  
+  
+  
+  this.playerHeight = opts.playerHeight || 1.62
 
   this.items = []
   this.voxels = voxel(this)
 
-  // was a three.js Scene instance, mainly used for scene.add(), objects, lights TODO: scene graph replacement? or can do without?
-  Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
-
-  // hooked up three.js Scene, created three.js PerspectiveCamera, added to element
-  // TODO: add this.view.cameraPosition(), this.view.cameraVector()? -> [x,y,z]  to game-shell-fps-camera, very useful
-  Object.defineProperty(this, 'view', {get:function() { throw new Error('voxel-engine "view" property removed') }})
-
-  // used to be a three.js PerspectiveCamera set by voxel-view; see also basic-camera but API not likely compatible (TODO: make it compatible?)
-  Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
-
-  
   
   // container/shell setup
   this.container.createShell( opts )
@@ -99,7 +106,7 @@ function Game(opts) {
   // reference to shell, hopefully can someday abstract this?
   this.shell = this.container.getShell()
   
-  //  redirect APIs that are now encapsulated in container..
+  //  container-related removal warnings:
   Object.defineProperty(this, 'setDimensions', {get:function() { throw new Error('voxel-engine "setDimensions" removed') }})
   Object.defineProperty(this, 'createContainer', {get:function() { throw new Error('voxel-engine "createContainer" moved to container module') }})
   Object.defineProperty(this, 'appendTo', {get:function() { throw new Error('voxel-engine "appendTo" moved to container module') }})
@@ -154,12 +161,6 @@ function Game(opts) {
   // client side only after this point
   if (!this.isClient) return
 
-  // materials
-  //this.materialNames = opts.materials || [['grass', 'dirt', 'grass_dirt'], 'brick', 'dirt']
-  this.materialNames = opts.materials
- 
-  //this.paused = true // TODO: should it start paused, then unpause when pointer lock is acquired?
-
   
   
   // input related setup 
@@ -168,7 +169,7 @@ function Game(opts) {
   //  (hopefully temporary) redirects to input funcitons
   this.onFire = function(state) { this.inputs.tempOnFire(state) }
   this.buttons = this.inputs.tempGetButtons()
-  // more temporary redirects, delete later..
+  // Input-related removal warnings:
   Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
   Object.defineProperty(this, 'interact', {get:function() { throw new Error('voxel-engine "interact" property removed') }})
 
@@ -191,21 +192,17 @@ function Game(opts) {
 
 
   // textures loaded, now can render chunks
-  this.stitcher = plugins.get('voxel-stitch')
-  this.stitcher.on('updatedSides', function() {
-    if (self.generateChunks) self.handleChunkGeneration()
-    self.showAllChunks()
 
-    // TODO: fix async chunk gen, loadPendingChunks() may load 1 even if this.pendingChunks empty
-    setTimeout(function() {
-      self.asyncChunkGeneration = 'asyncChunkGeneration' in opts ? opts.asyncChunkGeneration : true
-    }, 2000)
-  })
-  this.mesherPlugin = plugins.get('voxel-mesher')
-
-  this.cameraPlugin = plugins.get('game-shell-fps-camera') // TODO: support other plugins implementing same API
-
-
+  
+  this.rendering.setStitcherPlugin( plugins.get('voxel-stitch'), opts )
+  this.rendering.setMesherPlugin( plugins.get('voxel-mesher') )
+  this.rendering.setCameraPlugin( plugins.get('game-shell-fps-camera') )
+  // TODO: support other plugins implementing same API
+  
+  // rendering-related removal warnings..
+  Object.defineProperty(this, 'mesherPlugin', {get:function() { throw new Error('voxel-engine "mesherPlugin" property removed') }})
+  Object.defineProperty(this, 'stitcher', {get:function() { throw new Error('voxel-engine "stitcher" property removed') }})
+  
 }
 
 inherits(Game, EventEmitter)
@@ -220,24 +217,6 @@ Game.prototype.voxelPosition = function(gamePosition) {
   v[1] = _(p[1])
   v[2] = _(p[2])
   return v
-}
-
-var _position = new Array(3)
-Game.prototype.cameraPosition = function() {
-  if (this.cameraPlugin) {
-    this.cameraPlugin.getPosition(_position)
-  }
-
-  return _position
-}
-
-var _cameraVector = vector.create()
-Game.prototype.cameraVector = function() {
-  if (this.cameraPlugin) {
-    this.cameraPlugin.getVector(_cameraVector)
-  }
-
-  return _cameraVector
 }
 
 Game.prototype.makePhysical = function(target, envelope, blocksCreation) {
@@ -283,12 +262,13 @@ Game.prototype.removeItem = function(item) {
 // only intersects voxels, not items (for now)
 Game.prototype.raycast = // backwards compat
 Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) {
-  if (!start) return this.raycastVoxels(this.cameraPosition(), this.cameraVector(), 10)
+  if (!start) return this.raycastVoxels(this.rendering.cameraPosition(), 
+                                        this.rendering.cameraVector(), 10)
   
   var hitNormal = [0, 0, 0]
   var hitPosition = [0, 0, 0]
-  var cp = start || this.cameraPosition()
-  var cv = direction || this.cameraVector()
+  var cp = start || this.rendering.cameraPosition()
+  var cv = direction || this.rendering.cameraVector()
   var hitBlock = ray(this, cp, cv, maxDistance || 10.0, hitPosition, hitNormal, epilson || this.epilson)
   if (hitBlock <= 0) return false
   var adjacentPosition = [0, 0, 0]
@@ -413,7 +393,7 @@ Game.prototype.potentialCollisionSet = function() {
 
 Game.prototype.playerPosition = function() {
   var target = this.controls.target()
-  if (!target) return this.cameraPosition()
+  if (!target) return this.rendering.cameraPosition()
   var position = target.avatar.position
   return [position.x, position.y, position.z]
 }
@@ -574,7 +554,8 @@ Game.prototype.showChunk = function(chunk, optionalPosition) {
   //console.log('showChunk',chunkIndex,'density=',JSON.stringify(chunkDensity(chunk)))
 
   var voxelArray = isndarray(chunk) ? chunk : ndarray(chunk.voxels, chunk.dims)
-  var mesh = this.mesherPlugin.createVoxelMesh(this.shell.gl, voxelArray, this.stitcher.voxelSideTextureIDs, this.stitcher.voxelSideTextureSizes, chunk.position, this.chunkPad)
+  var mesh = this.rendering.stitchVoxelMesh( this.shell.gl, voxelArray, chunk.position, this.chunkPad)
+  // TODO: should the above API be on game.renderer or with data management?
 
   if (!mesh) {
     // no voxels
@@ -593,19 +574,6 @@ Game.prototype.showChunk = function(chunk, optionalPosition) {
 }
 
 // # Debugging methods
-
-Game.prototype.addMarker = function(position) {
-  throw new Error('voxel-engine addMarker not yet implemented TODO: figure out how to fit this into the rendering pipeline')
-}
-
-Game.prototype.addAABBMarker = function(aabb, color) {
-  throw new Error('voxel-engine addAABBMarker not yet implemented TODO')
-}
-
-Game.prototype.addVoxelMarker = function(x, y, z, color) {
-  var bbox = aabb([x, y, z], [1, 1, 1])
-  return this.addAABBMarker(bbox, color)
-}
 
 Game.prototype.pin = pin
 
@@ -633,9 +601,6 @@ Game.prototype.tick = function(delta) {
   this.spatial.emit('position', playerPos, playerPos)
 }
 
-Game.prototype.render = function(delta) {
-  this.view.render(this.scene)
-}
 
 // TODO: merge with game-shell render loop?
 Game.prototype.initializeTimer = function(rate) {
