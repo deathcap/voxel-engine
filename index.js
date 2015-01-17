@@ -7,8 +7,7 @@ var path = require('path')
 var EventEmitter = require('events').EventEmitter
 var collisions = require('collide-3d-tilemap')
 var aabb = require('aabb-3d')
-var glMatrix = require('gl-matrix')
-var vector = glMatrix.vec3
+var vec3 = require('gl-matrix').vec3
 var SpatialEventEmitter = require('spatial-events')
 var regionChange = require('voxel-region-change')
 var physical = require('voxel-physicals')
@@ -58,8 +57,9 @@ function Game(opts) {
   this.setConfigurablePositions(opts)
   this.configureChunkLoading(opts)
   Object.defineProperty(this, 'THREE', {get:function() { throw new Error('voxel-engine "THREE property removed') }})
-  this.vector = vector
-  this.glMatrix = glMatrix
+  Object.defineProperty(this, 'vector', {get:function() { throw new Error('voxel-engine "vector" property removed') }})
+  Object.defineProperty(this, 'glMatrix', {get:function() { throw new Error('voxel-engine "glMatrix" property removed') }})
+  this.vec3 = vec3
   this.arrayType = opts.arrayType || {1:Uint8Array, 2:Uint16Array, 4:Uint32Array}[opts.arrayTypeSize] || Uint8Array
   this.cubeSize = 1 // backwards compat
   this.chunkSize = opts.chunkSize || 32
@@ -273,7 +273,7 @@ Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) 
   if (hitBlock <= 0) return false
   var adjacentPosition = [0, 0, 0]
   var voxelPosition = this.voxelPosition(hitPosition)
-  vector.add(adjacentPosition, voxelPosition, hitNormal)
+  vec3.add(adjacentPosition, voxelPosition, hitNormal)
   
   return {
     position: hitPosition,
@@ -403,7 +403,7 @@ Game.prototype.playerAABB = function(position) {
   var lower = []
   var upper = [1/2, this.playerHeight, 1/2]
   var playerBottom = [1/4, this.playerHeight, 1/4]
-  vector.subtract(lower, pos, playerBottom)
+  vec3.subtract(lower, pos, playerBottom)
   var bbox = aabb(lower, upper)
   return bbox
 }
