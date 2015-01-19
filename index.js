@@ -5,12 +5,10 @@ var control = require('voxel-controls')
 var inherits = require('inherits')
 var path = require('path')
 var EventEmitter = require('events').EventEmitter
-var collisions = require('collide-3d-tilemap')
 var aabb = require('aabb-3d')
 var vec3 = require('gl-matrix').vec3
 var SpatialEventEmitter = require('spatial-events')
 var regionChange = require('voxel-region-change')
-var physical = require('voxel-physicals')
 var pin = require('pin-it')
 var tic = require('tic')()
 var ndarray = require('ndarray')
@@ -27,6 +25,7 @@ require('game-shell-fps-camera')
 var createInputs = require('./lib/inputs')
 var createContainer = require('./lib/container')
 var createRendering = require('./lib/rendering')
+var createPhysics = require('./lib/physics')
 
 module.exports = Game
 
@@ -128,12 +127,6 @@ function Game(opts) {
     }
   }})
 
-  this.collideVoxels = collisions(
-    this.getBlock.bind(this),
-    1,
-    [Infinity, Infinity, Infinity],
-    [-Infinity, -Infinity, -Infinity]
-  )
   
   this.timer = this.initializeTimer((opts.tickFPS || 16))
   this.paused = false
@@ -161,6 +154,13 @@ function Game(opts) {
   // client side only after this point
   if (!this.isClient) return
 
+  
+  // physics setup
+  this.physics = createPhysics(this, opts)
+  
+  // redirects
+  this.makePhysical = function(tgt, env, blocks) { return this.physics.makePhysical(tgt, env, blocks) }
+  this.gravity = this.physics.getGravity()
   
   
   // input related setup 
@@ -218,19 +218,11 @@ Game.prototype.voxelPosition = function(gamePosition) {
   return v
 }
 
-Game.prototype.makePhysical = function(target, envelope, blocksCreation) {
-  var vel = this.terminalVelocity
-  envelope = envelope || [2/3, 1.5, 2/3]
-  var obj = physical(target, this.potentialCollisionSet(), envelope, {x: vel[0], y: vel[1], z: vel[2]})
-  obj.blocksCreation = !!blocksCreation
-  return obj
-}
 
 Game.prototype.addItem = function(item) {
   if (!item.tick) {
-    var newItem = physical(
+    var newItem = this.physics.makePhysical(
       item.mesh,
-      this.potentialCollisionSet(),
       [item.size, item.size, item.size]
     )
     
@@ -350,11 +342,6 @@ Game.prototype.createAdjacent = function(hit, val) {
 
 // # Defaults/options parsing
 
-Game.prototype.gravity = [0, -0.0000036, 0]
-Game.prototype.friction = 0.3
-Game.prototype.epilson = 1e-8
-Game.prototype.terminalVelocity = [0.9, 0.1, 0.9]
-
 
 // used in methods that have identity function(pos) {}
 Game.prototype.parseVectorArguments = function(args) {
@@ -378,9 +365,6 @@ Game.prototype.control = function(target) {
   return this.controls.target(target)
 }
 
-Game.prototype.potentialCollisionSet = function() {
-  return [{ collide: this.collideTerrain.bind(this) }]
-}
 
 /**
  * Get the position of the player under control.
@@ -407,18 +391,6 @@ Game.prototype.playerAABB = function(position) {
   return bbox
 }
 
-Game.prototype.collideTerrain = function(other, bbox, vec, resting) {
-  var self = this
-  this.collideVoxels(bbox, vec, function hit(axis, tile, coords, dir, edge) {
-    if (!tile) return
-    if (Math.abs(vec[axis]) < Math.abs(edge)) return
-    vec[axis] = edge
-    other.acceleration[axis] = 0
-    resting[['x','y','z'][axis]] = dir // TODO: change to glm vec3 array?
-    other.friction[(axis + 1) % 3] = other.friction[(axis + 2) % 3] = axis === 1 ? self.friction  : 1
-    return true
-  })
-}
 
 
 // # Chunk related methods
