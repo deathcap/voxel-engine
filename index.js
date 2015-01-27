@@ -1,7 +1,7 @@
 'use strict'
 var voxel = require('voxel')
 var ray = require('voxel-raycast')
-var control = require('voxel-controls')
+var createController = require('voxel-fps-controller')
 var inherits = require('inherits')
 var path = require('path')
 var EventEmitter = require('events').EventEmitter
@@ -20,12 +20,12 @@ require('voxel-registry')
 require('voxel-stitch')
 require('voxel-shader')
 require('voxel-mesher')
-require('game-shell-fps-camera')
+var createBasicCamera = require('basic-camera')
 
 var createInputs = require('./lib/inputs')
 var createContainer = require('./lib/container')
 var createRendering = require('./lib/rendering')
-var createPhysics = require('./lib/physics')
+var createPhysEngine = require('voxel-physics-engine')
 
 module.exports = Game
 
@@ -34,7 +34,6 @@ var BUILTIN_PLUGIN_OPTS = {
   'voxel-stitch': {},
   'voxel-shader': {},
   'voxel-mesher': {},
-  'game-shell-fps-camera': {},
 }
 
 function Game(opts) {
@@ -90,7 +89,8 @@ function Game(opts) {
   // redirects for game properties (TODO: remove/abstract these)
   this.cameraPosition = this.rendering.cameraPosition
   this.cameraVector = this.rendering.cameraVector
-  
+  this.rendering.setCamera( createBasicCamera() )
+  this.getCamera = function() { return this.rendering.camera }
   
   
   this.playerHeight = opts.playerHeight || 1.62
@@ -131,7 +131,7 @@ function Game(opts) {
   this.timer = this.initializeTimer((opts.tickFPS || 16))
   this.paused = false
 
-  this.spatial = new SpatialEventEmitter
+  this.spatial = new SpatialEventEmitter()
   this.region = regionChange(this.spatial, aabb([0, 0, 0], [1, 1, 1]), this.chunkSize)
   this.voxelRegion = regionChange(this.spatial, 1)
   this.chunkRegion = regionChange(this.spatial, this.chunkSize)
@@ -156,11 +156,46 @@ function Game(opts) {
 
   
   // physics setup
-  this.physics = createPhysics(this, opts)
+  this.physics = createPhysEngine(this, opts)
+    
   
-  // redirects
-  this.makePhysical = function(tgt, env, blocks) { return this.physics.makePhysical(tgt, env, blocks) }
-  this.gravity = this.physics.getGravity()
+  
+  // create a physics body for the player
+  // this is all ad-hoc until I revisit entity management...
+  var playerW = 0.5
+  var playerH = 1.5
+  var paabb = new aabb( [ 14.25, 20, -10.25], [playerW, playerH, playerW] )
+  var avatar = {} // no need for avatar until player has a mesh..
+  var body = this.physics.addBody( avatar, paabb, true )
+  
+  // entity (item) to house player values, tick function
+  var p = {
+    body: body,
+    cam: this.rendering.camera,
+    posOffset: vec3.fromValues( playerW/2, 0, playerW/2 ),
+    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
+  }
+  p.getPosition = function() {
+    var pos = vec3.create()
+    return vec3.add( pos, this.body.aabb.base, this.posOffset )
+  }
+  p.getCamPosition = function() {
+    var pos = vec3.create()
+    return vec3.add( pos, this.body.aabb.base, this.camOffset )
+  }
+  p.tick = function(dt) {
+    var cpos = this.getCamPosition()
+    vec3.scale( cpos, cpos, -1 ) // camera uses inverse coords for some reason
+    this.cam.position = cpos
+  }
+  this.addItem(p)
+  
+  
+  // accessors for player - revisit later
+  this.playerBody = p.body
+  this.playerPosition = function() {
+    return p.getPosition()
+  }
   
   
   // input related setup 
@@ -174,9 +209,13 @@ function Game(opts) {
 
   
   
-  // hookup physics controls?
-  this.hookupControls(this.buttons, opts)
-
+  // hookup physics controls
+  this.controller = createController(this, opts)
+  this.controller.setTarget(this.playerBody)
+  this.controller.setCamera(this.rendering.camera)
+  
+  
+  
   // setup plugins
   var pluginOpts = opts.pluginOpts || {}
 
@@ -195,7 +234,6 @@ function Game(opts) {
   
   this.rendering.setStitcherPlugin( plugins.get('voxel-stitch'), opts )
   this.rendering.setMesherPlugin( plugins.get('voxel-mesher') )
-  this.rendering.setCameraPlugin( plugins.get('game-shell-fps-camera') )
   // TODO: support other plugins implementing same API
   
   // rendering-related removal warnings..
@@ -220,26 +258,9 @@ Game.prototype.voxelPosition = function(gamePosition) {
 
 
 Game.prototype.addItem = function(item) {
-  if (!item.tick) {
-    var newItem = this.physics.makePhysical(
-      item.mesh,
-      [item.size, item.size, item.size]
-    )
-    
-    if (item.velocity) {
-      newItem.velocity.copy(item.velocity)
-      newItem.subjectTo(this.gravity)
-    }
-    
-    newItem.repr = function() { return 'debris' }
-    newItem.mesh = item.mesh
-    newItem.blocksCreation = item.blocksCreation
-    
-    item = newItem
-  }
   
   this.items.push(item)
-  if (item.mesh) this.scene.add(item.mesh)
+//  if (item.mesh) this.scene.add(item.mesh)
   return this.items[this.items.length - 1]
 }
 
@@ -247,7 +268,7 @@ Game.prototype.removeItem = function(item) {
   var ix = this.items.indexOf(item)
   if (ix < 0) return
   this.items.splice(ix, 1)
-  if (item.mesh) this.scene.remove(item.mesh)
+//  if (item.mesh) this.scene.remove(item.mesh)
 }
 
 // only intersects voxels, not items (for now)
@@ -358,13 +379,6 @@ Game.prototype.setConfigurablePositions = function(opts) {
 }
 
 
-// # Physics/collision related methods
-
-Game.prototype.control = function(target) {
-  this.controlling = target
-  return this.controls.target(target)
-}
-
 
 /**
  * Get the position of the player under control.
@@ -375,10 +389,11 @@ Game.prototype.control = function(target) {
  */
 
 Game.prototype.playerPosition = function() {
-  var target = this.controls.target()
-  if (!target) return this.rendering.cameraPosition()
-  var position = target.avatar.position
-  return [position.x, position.y, position.z]
+  return this.getPlayerPosition()
+//  var target = this.controls.target()
+//  if (!target) return this.rendering.cameraPosition()
+//  var position = target.avatar.position
+//  return [position.x, position.y, position.z]
 }
 
 Game.prototype.playerAABB = function(position) {
@@ -554,6 +569,15 @@ Game.prototype.setInterval = tic.interval.bind(tic)
 Game.prototype.setTimeout = tic.timeout.bind(tic)
 
 Game.prototype.tick = function(delta) {
+  
+  // revisit this when I sort out where delta comes from, but
+  // for now, highly variable timesteps are Considered Harmful
+  if (delta > 200) delta = 200
+  
+  this.controller.tick(delta)
+  
+  this.physics.tick(delta)
+  
   for(var i = 0, len = this.items.length; i < len; ++i) {
     this.items[i].tick(delta)
   }
@@ -567,7 +591,6 @@ Game.prototype.tick = function(delta) {
 
   this.emit('tick', delta)
   
-  //if (!this.controls) return // this.controls removed; still load chunks
   var playerPos = this.playerPosition()
   this.spatial.emit('position', playerPos, playerPos)
 }
@@ -608,15 +631,6 @@ Game.prototype.initializeTimer = function(rate) {
   }
 }
 
-
-Game.prototype.hookupControls = function(buttons, opts) {
-  opts = opts || {}
-  opts.controls = opts.controls || {}
-  opts.controls.onfire = this.onFire.bind(this)
-  this.controls = control(buttons, opts.controls)
-  this.items.push(this.controls)
-  this.controlling = null
-}
 
 Game.prototype.handleChunkGeneration = function() {
   var self = this
