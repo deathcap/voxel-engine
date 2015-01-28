@@ -162,8 +162,8 @@ function Game(opts) {
   
   // create a physics body for the player
   // this is all ad-hoc until I revisit entity management...
-  var playerW = 0.5
-  var playerH = 1.5
+  var playerW = .7
+  var playerH = 1.6
   var paabb = new aabb( [ 14.25, 20, -10.25], [playerW, playerH, playerW] )
   var avatar = {} // no need for avatar until player has a mesh..
   var body = this.physics.addBody( avatar, paabb, true )

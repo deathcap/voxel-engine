@@ -36,7 +36,7 @@
     "voxel-registry": "^0.8.1",
     "voxel-shader": "andyhall/voxel-shader#98679057496b48a2a9006f6be4fde46d777d39c4",
     "voxel-stitch": "^0.9.1",
-    "voxel-fps-controller": "andyhall/voxel-fps-controller#71d0ff7bba2560c9a10d313052501ba85057fe7f",
+    "voxel-fps-controller": "andyhall/voxel-fps-controller#9b8f1ac491c84fa255807efe96c69000996fa442",
     "voxel-physics-engine": "andyhall/voxel-physics-engine#b2537e2ea2469d6684f563b57540310cc98b6e39"
   },
   "devDependencies": {
