@@ -345,16 +345,17 @@ Game.prototype.blockPosition = function(pos) {
 Game.prototype.blocks = function(low, high, iterator) {
   var l = low, h = high
   var d = [ h[0]-l[0], h[1]-l[1], h[2]-l[2] ]
-  if (!iterator) var voxels = new this.arrayType(d[0]*d[1]*d[2])
+  var voxels
+  if (!iterator) voxels = new this.arrayType(d[0]*d[1]*d[2])
   var i = 0
   for(var z=l[2]; z<h[2]; ++z)
-  for(var y=l[1]; y<h[1]; ++y)
-  for(var x=l[0]; x<h[0]; ++x, ++i) {
-    if (iterator) iterator(x, y, z, i)
-    else voxels[i] = this.voxels.voxelAtPosition([x, y, z])
-  }
+    for(var y=l[1]; y<h[1]; ++y)
+      for(var x=l[0]; x<h[0]; ++x, ++i) {
+        if (iterator) iterator(x, y, z, i)
+        else voxels[i] = this.voxels.voxelAtPosition([x, y, z])
+          }
   if (!iterator) return {voxels: voxels, dims: d}
-}
+    }
 
 // backwards compat
 Game.prototype.createAdjacent = function(hit, val) {
