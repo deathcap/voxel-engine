@@ -21,11 +21,12 @@ require('voxel-stitch')
 require('voxel-shader')
 require('voxel-mesher')
 var createBasicCamera = require('basic-camera')
+var createPhysEngine = require('voxel-physics-engine')
 
 var createInputs = require('./lib/inputs')
 var createContainer = require('./lib/container')
 var createRendering = require('./lib/rendering')
-var createPhysEngine = require('voxel-physics-engine')
+var createEntity = require('./lib/entity')
 
 module.exports = Game
 
@@ -41,11 +42,11 @@ function Game(opts) {
   var self = this
   if (!opts) opts = {}
   if (opts.pluginOpts && opts.pluginOpts['voxel-engine']) opts = extend(opts, opts.pluginOpts['voxel-engine'])
-  
+
   // create container submodule
   this.container = createContainer( this, opts )
   if (process.browser && this.container.notCapable(opts)) return
-  
+
 
   // is this a client or a headless server
   this.isClient = Boolean( (typeof opts.isClient !== 'undefined') ? opts.isClient : process.browser )
@@ -62,17 +63,17 @@ function Game(opts) {
   this.cubeSize = 1 // backwards compat
   this.chunkSize = opts.chunkSize || 32
   this.chunkPad = opts.chunkPad || 4
-  
+
   // chunkDistance and removeDistance should not be set to the same thing
   // as it causes lag when you go back and forth on a chunk boundary
   this.chunkDistance = opts.chunkDistance || 2
   this.removeDistance = opts.removeDistance || this.chunkDistance + 1
-  
-  
-  
+
+
+
   // set up rendering
   this.rendering = createRendering(this, opts)
-  
+
   // warn about many removed or NYI rendering properties:
   Object.defineProperty(this, 'mesher', {get:function() { throw new Error('voxel-engine "mesher" property removed') }})
   Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
@@ -85,26 +86,30 @@ function Game(opts) {
   Object.defineProperty(this, 'skyColor', {get:function() { throw new Error('voxel-engine "skyColor" has moved into rendering module') }})
   Object.defineProperty(this, 'antialias', {get:function() { throw new Error('voxel-engine "antialias" has moved into rendering module') }})
   Object.defineProperty(this, 'meshType', {get:function() { throw new Error('voxel-engine "meshType" has moved into rendering module') }})
-  
+
   // redirects for game properties (TODO: remove/abstract these)
   this.cameraPosition = this.rendering.cameraPosition
   this.cameraVector = this.rendering.cameraVector
   this.rendering.setCamera( createBasicCamera() )
   this.getCamera = function() { return this.rendering.camera }
-  
-  
+
+
   this.playerHeight = opts.playerHeight || 1.62
 
-  this.items = []
+
+  // set up entities
+  this.entities = []
+
+  // voxel data
   this.voxels = voxel(this)
 
-  
+
   // container/shell setup
   this.container.createShell( opts )
-  
+
   // reference to shell, hopefully can someday abstract this?
   this.shell = this.container.getShell()
-  
+
   //  container-related removal warnings:
   Object.defineProperty(this, 'setDimensions', {get:function() { throw new Error('voxel-engine "setDimensions" removed') }})
   Object.defineProperty(this, 'createContainer', {get:function() { throw new Error('voxel-engine "createContainer" moved to container module') }})
@@ -113,9 +118,9 @@ function Game(opts) {
   Object.defineProperty(this, 'notCapableMessage', {get:function() { throw new Error('voxel-engine "notCapableMessage" moved to container module') }})
   Object.defineProperty(this, 'height', {get:function() { throw new Error('voxel-engine "height" removed') }})
   Object.defineProperty(this, 'width', {get:function() { throw new Error('voxel-engine "width" removed') }})
-  
-  
-  
+
+
+
   // setup plugins
   var plugins = createPlugins(this, {require: function(name) {
     // we provide the built-in plugins ourselves; otherwise check caller's require, if any
@@ -127,7 +132,7 @@ function Game(opts) {
     }
   }})
 
-  
+
   this.timer = this.initializeTimer((opts.tickFPS || 16))
   this.paused = false
 
@@ -141,12 +146,12 @@ function Game(opts) {
   this.chunksNeedsUpdate = {}
   // contains new chunks yet to be generated. Handled by game.loadPendingChunks
   this.pendingChunks = []
-  
+
   if (this.isClient) {
     if (opts.exposeGlobal) window.game = window.g = this
-  }
+      }
 
- 
+
   self.chunkRegion.on('change', function(newChunk) {
     self.removeFarChunks()
   })
@@ -154,52 +159,22 @@ function Game(opts) {
   // client side only after this point
   if (!this.isClient) return
 
-  
+
   // physics setup
   this.physics = createPhysEngine(this, opts)
-    
-  
-  
-  // create a physics body for the player
-  // this is all ad-hoc until I revisit entity management...
-  var playerW = .7
-  var playerH = 1.6
-  var paabb = new aabb( [ 14.25, 20, -10.25], [playerW, playerH, playerW] )
-  var avatar = {} // no need for avatar until player has a mesh..
-  var body = this.physics.addBody( avatar, paabb, true )
-  
-  // entity (item) to house player values, tick function
-  var p = {
-    body: body,
-    cam: this.rendering.camera,
-    posOffset: vec3.fromValues( playerW/2, 0, playerW/2 ),
-    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
-  }
-  p.getPosition = function() {
-    var pos = vec3.create()
-    return vec3.add( pos, this.body.aabb.base, this.posOffset )
-  }
-  p.getCamPosition = function() {
-    var pos = vec3.create()
-    return vec3.add( pos, this.body.aabb.base, this.camOffset )
-  }
-  p.tick = function(dt) {
-    var cpos = this.getCamPosition()
-    vec3.scale( cpos, cpos, -1 ) // camera uses inverse coords for some reason
-    this.cam.position = cpos
-  }
-  this.addItem(p)
-  
-  
-  // accessors for player - revisit later
-  this.playerBody = p.body
+
+
+
+  this.playerEntity = initPlayerEntity( this )
+
+  // accessors for player - TODO: reconsider?
   this.playerPosition = function() {
-    return p.getPosition()
+    return this.playerEntity.getPosition()
   }
-  
-  
+
+
   // input related setup 
-  
+
   this.inputs = createInputs(this,opts)
   //  (hopefully temporary) redirects to input funcitons
   this.onFire = function(state) { this.inputs.tempOnFire(state) }
@@ -207,15 +182,15 @@ function Game(opts) {
   // Input-related removal warnings:
   Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
 
-  
-  
+
+
   // hookup physics controls
   this.controller = createController(this, opts)
-  this.controller.setTarget(this.playerBody)
+  this.controller.setTarget(this.playerEntity.body)
   this.controller.setCamera(this.rendering.camera)
-  
-  
-  
+
+
+
   // setup plugins
   var pluginOpts = opts.pluginOpts || {}
 
@@ -223,23 +198,23 @@ function Game(opts) {
     pluginOpts[name] = pluginOpts[name] || BUILTIN_PLUGIN_OPTS[name]
   }
 
-  for (var name in pluginOpts) {
-    plugins.add(name, pluginOpts[name])
+  for (var name2 in pluginOpts) {
+    plugins.add(name2, pluginOpts[name])
   }
   plugins.loadAll()
 
 
   // textures loaded, now can render chunks
 
-  
+
   this.rendering.setStitcherPlugin( plugins.get('voxel-stitch'), opts )
   this.rendering.setMesherPlugin( plugins.get('voxel-mesher') )
   // TODO: support other plugins implementing same API
-  
+
   // rendering-related removal warnings..
   Object.defineProperty(this, 'mesherPlugin', {get:function() { throw new Error('voxel-engine "mesherPlugin" property removed') }})
   Object.defineProperty(this, 'stitcher', {get:function() { throw new Error('voxel-engine "stitcher" property removed') }})
-  
+
 }
 
 inherits(Game, EventEmitter)
@@ -257,26 +232,98 @@ Game.prototype.voxelPosition = function(gamePosition) {
 }
 
 
-Game.prototype.addItem = function(item) {
-  
-  this.items.push(item)
-//  if (item.mesh) this.scene.add(item.mesh)
-  return this.items[this.items.length - 1]
+
+
+/*
+ *    ENTITY MANAGEMENT
+*/
+
+
+Game.prototype.addEntity = function(data, aabb, offset, mesh, tickFn) {
+  var body
+  if (aabb) {
+    body = this.physics.addBody( data, aabb )
+  }
+  var e = createEntity(data, body, offset, mesh, tickFn)
+  this.entities.push(e)
+  return e
 }
 
-Game.prototype.removeItem = function(item) {
-  var ix = this.items.indexOf(item)
+Game.prototype.removeEntity = function(e) {
+  var ix = this.entities.indexOf(e)
   if (ix < 0) return
-  this.items.splice(ix, 1)
-//  if (item.mesh) this.scene.remove(item.mesh)
+  if (e.body) this.physics.removeBody(e.body)
+  this.entities.splice(ix, 1)
 }
+
+
+
+// player entity creation
+
+function initPlayerEntity(game) {
+  // options ad-hoc for now..
+  var playerW = 0.7
+  var playerH = 1.6
+  var paabb = new aabb( [ 0, 20, 0], [ playerW, playerH, playerW ] )
+  var offset = vec3.fromValues( playerW/2, 0, playerW/2 )
+
+  // create an avatar with references to the camera..
+  var data = {
+    cam: game.rendering.camera,
+    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
+  }
+
+  // tick function references game's camera object and updates it
+  var tick = function(dt) {
+    var camPos = vec3.create()
+    vec3.add( camPos, this.body.aabb.base, this.data.camOffset )
+    // basic-camera uses inverse coords for some reason
+    vec3.scale( camPos, camPos, -1 )
+    this.data.cam.position = camPos
+  }
+
+  return game.addEntity( data, paabb, offset, null, tick )
+
+
+  //  var body = this.physics.addBody( avatar, paabb, true )
+  //  
+  //  // entity (item) to house player values, tick function
+  //  var p = {
+  //    body: body,
+  //    cam: this.rendering.camera,
+  //    posOffset: vec3.fromValues( playerW/2, 0, playerW/2 ),
+  //    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
+  //  }
+  //  p.getPosition = function() {
+  //    var pos = vec3.create()
+  //    return vec3.add( pos, this.body.aabb.base, this.posOffset )
+  //  }
+  //  p.getCamPosition = function() {
+  //    var pos = vec3.create()
+  //    return vec3.add( pos, this.body.aabb.base, this.camOffset )
+  //  }
+  //  p.tick = function(dt) {
+  //    var cpos = this.getCamPosition()
+  //    vec3.scale( cpos, cpos, -1 ) // camera uses inverse coords for some reason
+  //    this.cam.position = cpos
+  //  }
+  //  this.addItem(p)
+}
+
+
+
+
+
+
+
+
 
 // only intersects voxels, not items (for now)
 Game.prototype.raycast = // backwards compat
-Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) {
+  Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) {
   if (!start) return this.raycastVoxels(this.rendering.cameraPosition(), 
                                         this.rendering.cameraVector(), 10)
-  
+
   var hitNormal = [0, 0, 0]
   var hitPosition = [0, 0, 0]
   var cp = start || this.rendering.cameraPosition()
@@ -286,7 +333,7 @@ Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) 
   var adjacentPosition = [0, 0, 0]
   var voxelPosition = this.voxelPosition(hitPosition)
   vec3.add(adjacentPosition, voxelPosition, hitNormal)
-  
+
   return {
     position: hitPosition,
     voxel: voxelPosition,
@@ -301,12 +348,12 @@ Game.prototype.canCreateBlock = function(pos) {
   pos = this.parseVectorArguments(arguments)
   var floored = pos.map(function(i) { return Math.floor(i) })
   var bbox = aabb(floored, [1, 1, 1])
-  
-  for (var i = 0, len = this.items.length; i < len; ++i) {
-    var item = this.items[i]
-    var itemInTheWay = item.blocksCreation && item.aabb && bbox.intersects(item.aabb())
-    if (itemInTheWay) return false
-  }
+
+  //  for (var i = 0, len = this.items.length; i < len; ++i) {
+  //    var item = this.items[i]
+  //    var itemInTheWay = item.blocksCreation && item.aabb && bbox.intersects(item.aabb())
+  //    if (itemInTheWay) return false
+  //  }
 
   return true
 }
@@ -391,10 +438,10 @@ Game.prototype.setConfigurablePositions = function(opts) {
 
 Game.prototype.playerPosition = function() {
   return this.getPlayerPosition()
-//  var target = this.controls.target()
-//  if (!target) return this.rendering.cameraPosition()
-//  var position = target.avatar.position
-//  return [position.x, position.y, position.z]
+  //  var target = this.controls.target()
+  //  if (!target) return this.rendering.cameraPosition()
+  //  var position = target.avatar.position
+  //  return [position.x, position.y, position.z]
 }
 
 Game.prototype.playerAABB = function(position) {
@@ -498,10 +545,10 @@ Game.prototype.loadPendingChunks = function(count) {
     var chunk = this.voxels.generateChunk(chunkPos[0]|0, chunkPos[1]|0, chunkPos[2]|0)
 
     if (this.isClient) this.showChunk(chunk)
-  }
+      }
 
   if (count) pendingChunks.splice(0, count)
-}
+    }
 
 Game.prototype.getChunkAtPosition = function(pos) {
   var chunkID = this.voxels.chunkAtPosition(pos).join('|')
@@ -527,8 +574,8 @@ var chunkDensity = function(chunk) {
   }
 
   var densities = {}
-  for (var val in counts) {
-    densities[val] = counts[val] / length
+  for (var val2 in counts) {
+    densities[val2] = counts[val2] / length
   }
   return densities
 }
@@ -570,28 +617,31 @@ Game.prototype.setInterval = tic.interval.bind(tic)
 Game.prototype.setTimeout = tic.timeout.bind(tic)
 
 Game.prototype.tick = function(delta) {
-  
-  // revisit this when I sort out where delta comes from, but
+
+  // TODO: revisit timing
   // for now, highly variable timesteps are Considered Harmful
   if (delta > 200) delta = 200
-  
+
   this.controller.tick(delta)
-  
+
   this.physics.tick(delta)
-  
-  for(var i = 0, len = this.items.length; i < len; ++i) {
-    this.items[i].tick(delta)
+
+  // tick entities
+  for(var i=0; i<this.entities.length; ++i) {
+    if (this.entities[i].tick) {
+      this.entities[i].tick()
+    }
   }
-  
+
   //if (this.materials) this.materials.tick(delta)
 
   if (this.pendingChunks.length) this.loadPendingChunks()
   if (Object.keys(this.chunksNeedsUpdate).length > 0) this.updateDirtyChunks()
-  
+
   tic.tick(delta)
 
   this.emit('tick', delta)
-  
+
   var playerPos = this.playerPosition()
   this.spatial.emit('position', playerPos, playerPos)
 }
@@ -605,11 +655,11 @@ Game.prototype.initializeTimer = function(rate) {
   var last = null
   var dt = 0
   var wholeTick
-  
+
   self.frameUpdated = true
   self.interval = setInterval(timer, 0)
   return self.interval
-  
+
   function timer() {
     if (self.paused) {
       last = Date.now()
@@ -624,10 +674,10 @@ Game.prototype.initializeTimer = function(rate) {
     wholeTick = ((accum / rate)|0)
     if (wholeTick <= 0) return
     wholeTick *= rate
-    
+
     self.tick(wholeTick)
     accum -= wholeTick
-    
+
     self.frameUpdated = true
   }
 }
