@@ -444,15 +444,15 @@ Game.prototype.playerPosition = function() {
   //  return [position.x, position.y, position.z]
 }
 
-Game.prototype.playerAABB = function(position) {
-  var pos = position || this.playerPosition()
-  var lower = []
-  var upper = [1/2, this.playerHeight, 1/2]
-  var playerBottom = [1/4, this.playerHeight, 1/4]
-  vec3.subtract(lower, pos, playerBottom)
-  var bbox = aabb(lower, upper)
-  return bbox
-}
+//Game.prototype.playerAABB = function(position) {
+//  var pos = position || this.playerPosition()
+//  var lower = []
+//  var upper = [1/2, this.playerHeight, 1/2]
+//  var playerBottom = [1/4, this.playerHeight, 1/4]
+//  vec3.subtract(lower, pos, playerBottom)
+//  var bbox = aabb(lower, upper)
+//  return bbox
+//}
 
 
 
