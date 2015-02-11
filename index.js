@@ -6,10 +6,9 @@ var inherits = require('inherits')
 var path = require('path')
 var EventEmitter = require('events').EventEmitter
 var aabb = require('aabb-3d')
-var vec3 = require('gl-matrix').vec3
+var vec3 = require('gl-vec3')
 var SpatialEventEmitter = require('spatial-events')
 var regionChange = require('voxel-region-change')
-var pin = require('pin-it')
 var tic = require('tic')()
 var ndarray = require('ndarray')
 var isndarray = require('isndarray')
@@ -613,10 +612,6 @@ Game.prototype.showChunk = function(chunk, optionalPosition) {
   this.emit('renderChunk', chunk)
   return mesh
 }
-
-// # Debugging methods
-
-Game.prototype.pin = pin
 
 // # Misc internal methods
 
