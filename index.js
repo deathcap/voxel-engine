@@ -161,7 +161,8 @@ function Game(opts) {
 
 
   // physics setup
-  this.physics = createPhysEngine(this, opts)
+  var blockGetter = this.getBlock.bind(this)
+  this.physics = createPhysEngine(opts, blockGetter)
 
 
 
@@ -185,9 +186,14 @@ function Game(opts) {
 
 
   // hookup physics controls
-  this.controller = createController(this, opts)
+  this.controller = createController(opts, this.buttons)
   this.controller.setTarget(this.playerEntity.body)
-  this.controller.setCamera(this.rendering.camera)
+  var c = this.rendering.camera
+  var camAccessor = {
+    getRotationXY: function() { return [ c.rotationX, c.rotationY ] },
+    setRotationXY: function(x,y) { c.rotationX = x; c.rotationY = y }
+  }
+  this.controller.setCameraAccessor(camAccessor)
 
 
 
