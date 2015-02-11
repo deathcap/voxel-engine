@@ -199,7 +199,7 @@ function Game(opts) {
   }
 
   for (var name2 in pluginOpts) {
-    plugins.add(name2, pluginOpts[name])
+    plugins.add(name2, pluginOpts[name2])
   }
   plugins.loadAll()
 
