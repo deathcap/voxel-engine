@@ -87,8 +87,8 @@ function Game(opts) {
   Object.defineProperty(this, 'meshType', {get:function() { throw new Error('voxel-engine "meshType" has moved into rendering module') }})
 
   // redirects for game properties (TODO: remove/abstract these)
-  this.cameraPosition = this.rendering.cameraPosition
-  this.cameraVector = this.rendering.cameraVector
+  this.cameraPosition = this.rendering.cameraPosition.bind(this.rendering)
+  this.cameraVector = this.rendering.cameraVector.bind(this.rendering)
   this.rendering.setCamera( createBasicCamera() )
   this.getCamera = function() { return this.rendering.camera }
 
