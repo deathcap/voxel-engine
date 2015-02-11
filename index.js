@@ -12,6 +12,7 @@ var regionChange = require('voxel-region-change')
 var tic = require('tic')()
 var ndarray = require('ndarray')
 var isndarray = require('isndarray')
+var throttle = require('underscore').throttle // TODO: remove underscore dependency
 
 var createPlugins = require('voxel-plugins')
 var extend = require('extend')
@@ -178,7 +179,7 @@ function Game(opts) {
 
   this.inputs = createInputs(this,opts)
   //  (hopefully temporary) redirects to input funcitons
-  this.onFire = function(state) { this.inputs.tempOnFire(state) }
+  this.onFire = throttle(function(state) { this.inputs.tempOnFire(state) }, opts.frequency || 100)
   this.buttons = this.inputs.tempGetButtons()
   // Input-related removal warnings:
   Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
@@ -641,6 +642,11 @@ Game.prototype.tick = function(delta) {
   if (Object.keys(this.chunksNeedsUpdate).length > 0) this.updateDirtyChunks()
 
   tic.tick(delta)
+
+  // continuously emit 'fire' events when buttons are held down (limited to opts.frequency)
+  // TODO: revisit
+  if (this.buttons.fire || this.buttons.firealt)
+    this.onFire(this.buttons)
 
   this.emit('tick', delta)
 

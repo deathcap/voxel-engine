@@ -21,6 +21,7 @@
     "inherits": "^2.0.1",
     "isndarray": "^0.1.0",
     "ndarray": "^1.0.15",
+    "underscore": "^1.7.0",
     "spatial-events": "^1.1.0",
     "tic": "^0.2.1",
     "voxel": "git://github.com/deathcap/voxel.git#2a92d917199aedc89267c60eb0687d3472a7ce2f",
