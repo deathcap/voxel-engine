@@ -29,15 +29,15 @@
     "spatial-trigger": "^0.0.0",
     "tic": "^0.2.1",
     "voxel": "git://github.com/deathcap/voxel.git#2a92d917199aedc89267c60eb0687d3472a7ce2f",
+    "voxel-fps-controller": "^0.1.0",
     "voxel-mesher": "^0.14.0",
+    "voxel-physics-engine": "^0.2.0",
     "voxel-plugins": "^0.3.2",
     "voxel-raycast": "^0.2.1",
     "voxel-region-change": "^0.1.0",
     "voxel-registry": "^0.8.1",
     "voxel-shader": "andyhall/voxel-shader#98679057496b48a2a9006f6be4fde46d777d39c4",
-    "voxel-stitch": "^0.9.1",
-    "voxel-fps-controller": "andyhall/voxel-fps-controller#9b8f1ac491c84fa255807efe96c69000996fa442",
-    "voxel-physics-engine": "andyhall/voxel-physics-engine#b2537e2ea2469d6684f563b57540310cc98b6e39"
+    "voxel-stitch": "^0.9.1"
   },
   "devDependencies": {
     "tape": "^2.13.2"
