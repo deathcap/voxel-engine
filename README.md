@@ -1,10 +1,13 @@
 # voxel-engine
 
-## A voxel engine in javascript using three.js
+This is an exprimental fork/branch of voxel-engine#ndarray.
+It attempts to impose some structure on the engine by 
+splitting key areas of functionality into submodules. 
 
-Learn more at http://voxeljs.com
+The motivtation is to prevent game plugins from tightly coupling 
+with lower-level dependencies, by imposing interfaces between them.
 
-Write a voxel.js game in browser: http://voxel-creator.jit.su
+Very early stages for the moment.
 
 hello world template repo: http://github.com/deathcap/voxel-example
 

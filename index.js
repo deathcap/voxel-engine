@@ -1,19 +1,14 @@
 'use strict'
 var voxel = require('voxel')
 var ray = require('voxel-raycast')
-var control = require('voxel-controls')
-var Stats = require('./lib/stats')
-var Detector = require('./lib/detector')
+var createController = require('voxel-fps-controller')
 var inherits = require('inherits')
 var path = require('path')
 var EventEmitter = require('events').EventEmitter
-var collisions = require('collide-3d-tilemap')
 var aabb = require('aabb-3d')
-var glMatrix = require('gl-matrix')
-var vector = glMatrix.vec3
+var vec3 = require('gl-matrix').vec3
 var SpatialEventEmitter = require('spatial-events')
 var regionChange = require('voxel-region-change')
-var physical = require('voxel-physicals')
 var pin = require('pin-it')
 var tic = require('tic')()
 var ndarray = require('ndarray')
@@ -25,7 +20,13 @@ require('voxel-registry')
 require('voxel-stitch')
 require('voxel-shader')
 require('voxel-mesher')
-require('game-shell-fps-camera')
+var createBasicCamera = require('basic-camera')
+var createPhysEngine = require('voxel-physics-engine')
+
+var createInputs = require('./lib/inputs')
+var createContainer = require('./lib/container')
+var createRendering = require('./lib/rendering')
+var createEntity = require('./lib/entity')
 
 module.exports = Game
 
@@ -34,7 +35,6 @@ var BUILTIN_PLUGIN_OPTS = {
   'voxel-stitch': {},
   'voxel-shader': {},
   'voxel-mesher': {},
-  'game-shell-fps-camera': {},
 }
 
 function Game(opts) {
@@ -42,7 +42,11 @@ function Game(opts) {
   var self = this
   if (!opts) opts = {}
   if (opts.pluginOpts && opts.pluginOpts['voxel-engine']) opts = extend(opts, opts.pluginOpts['voxel-engine'])
-  if (process.browser && this.notCapable(opts)) return
+
+  // create container submodule
+  this.container = createContainer( this, opts )
+  if (process.browser && this.container.notCapable(opts)) return
+
 
   // is this a client or a headless server
   this.isClient = Boolean( (typeof opts.isClient !== 'undefined') ? opts.isClient : process.browser )
@@ -51,64 +55,70 @@ function Game(opts) {
   this.generateChunks = opts.generateChunks
   this.setConfigurablePositions(opts)
   this.configureChunkLoading(opts)
-  this.setDimensions(opts)
   Object.defineProperty(this, 'THREE', {get:function() { throw new Error('voxel-engine "THREE property removed') }})
-  this.vector = vector
-  this.glMatrix = glMatrix
+  Object.defineProperty(this, 'vector', {get:function() { throw new Error('voxel-engine "vector" property removed') }})
+  Object.defineProperty(this, 'glMatrix', {get:function() { throw new Error('voxel-engine "glMatrix" property removed') }})
+  this.vec3 = vec3
   this.arrayType = opts.arrayType || {1:Uint8Array, 2:Uint16Array, 4:Uint32Array}[opts.arrayTypeSize] || Uint8Array
   this.cubeSize = 1 // backwards compat
   this.chunkSize = opts.chunkSize || 32
   this.chunkPad = opts.chunkPad || 4
-  
+
   // chunkDistance and removeDistance should not be set to the same thing
   // as it causes lag when you go back and forth on a chunk boundary
   this.chunkDistance = opts.chunkDistance || 2
   this.removeDistance = opts.removeDistance || this.chunkDistance + 1
-  
-  this.skyColor = opts.skyColor || 0xBFD1E5
-  this.antialias = opts.antialias
-  this.playerHeight = opts.playerHeight || 1.62
-  this.meshType = opts.meshType || 'surfaceMesh'
 
-  // was a 'voxel' module meshers object, now using voxel-mesher(ao-mesher)
+
+
+  // set up rendering
+  this.rendering = createRendering(this, opts)
+
+  // warn about many removed or NYI rendering properties:
   Object.defineProperty(this, 'mesher', {get:function() { throw new Error('voxel-engine "mesher" property removed') }})
+  Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
+  Object.defineProperty(this, 'view', {get:function() { throw new Error('voxel-engine "view" property removed') }})
+  Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
+  Object.defineProperty(this, 'render', {get:function() { throw new Error('voxel-engine "render" method removed') }})
+  Object.defineProperty(this, 'addMarker', {get:function() { throw new Error('voxel-engine "addMarker" is NYI') }})
+  Object.defineProperty(this, 'addAABBMarker', {get:function() { throw new Error('voxel-engine "addAABBMarker" is NYI') }})
+  Object.defineProperty(this, 'addVoxelMarker', {get:function() { throw new Error('voxel-engine "addVoxelMarker" is NYI') }})
+  Object.defineProperty(this, 'skyColor', {get:function() { throw new Error('voxel-engine "skyColor" has moved into rendering module') }})
+  Object.defineProperty(this, 'antialias', {get:function() { throw new Error('voxel-engine "antialias" has moved into rendering module') }})
+  Object.defineProperty(this, 'meshType', {get:function() { throw new Error('voxel-engine "meshType" has moved into rendering module') }})
 
-  this.items = []
+  // redirects for game properties (TODO: remove/abstract these)
+  this.cameraPosition = this.rendering.cameraPosition
+  this.cameraVector = this.rendering.cameraVector
+  this.rendering.setCamera( createBasicCamera() )
+  this.getCamera = function() { return this.rendering.camera }
+
+
+  this.playerHeight = opts.playerHeight || 1.62
+
+
+  // set up entities
+  this.entities = []
+
+  // voxel data
   this.voxels = voxel(this)
 
-  // was a three.js Scene instance, mainly used for scene.add(), objects, lights TODO: scene graph replacement? or can do without?
-  Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
 
-  // hooked up three.js Scene, created three.js PerspectiveCamera, added to element
-  // TODO: add this.view.cameraPosition(), this.view.cameraVector()? -> [x,y,z]  to game-shell-fps-camera, very useful
-  Object.defineProperty(this, 'view', {get:function() { throw new Error('voxel-engine "view" property removed') }})
+  // container/shell setup
+  this.container.createShell( opts )
 
-  // used to be a three.js PerspectiveCamera set by voxel-view; see also basic-camera but API not likely compatible (TODO: make it compatible?)
-  Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
+  // reference to shell, hopefully can someday abstract this?
+  this.shell = this.container.getShell()
 
+  //  container-related removal warnings:
+  Object.defineProperty(this, 'setDimensions', {get:function() { throw new Error('voxel-engine "setDimensions" removed') }})
+  Object.defineProperty(this, 'createContainer', {get:function() { throw new Error('voxel-engine "createContainer" moved to container module') }})
+  Object.defineProperty(this, 'appendTo', {get:function() { throw new Error('voxel-engine "appendTo" moved to container module') }})
+  Object.defineProperty(this, 'notCapable', {get:function() { throw new Error('voxel-engine "notCapable" moved to container module') }})
+  Object.defineProperty(this, 'notCapableMessage', {get:function() { throw new Error('voxel-engine "notCapableMessage" moved to container module') }})
+  Object.defineProperty(this, 'height', {get:function() { throw new Error('voxel-engine "height" removed') }})
+  Object.defineProperty(this, 'width', {get:function() { throw new Error('voxel-engine "width" removed') }})
 
-
-  // the game-shell
-  if (this.isClient) /*GZ: Do not load on server, as document element is missing*/
-  {
-    var createShell = require('gl-now')
-    var shellOpts = shellOpts || {}
-    shellOpts.clearColor = [
-      (this.skyColor >> 16) / 255.0,
-      ((this.skyColor >> 8) & 0xff) / 255.0,
-      (this.skyColor & 0xff) / 255.0,
-      1.0]
-    shellOpts.pointerLock = opts.pointerLock !== undefined ? opts.pointerLock : true
-    shellOpts.element = this.createContainer(opts)
-    var shell = createShell(shellOpts)
-  
-    shell.on('gl-error', function(err) {
-      // normally not reached; notCapable() checks for WebGL compatibility first
-      document.body.appendChild(document.createTextNode('Fatal WebGL error: ' + err))
-    })
-  
-    this.shell = shell
-  }
 
   // setup plugins
   var plugins = createPlugins(this, {require: function(name) {
@@ -121,17 +131,11 @@ function Game(opts) {
     }
   }})
 
-  this.collideVoxels = collisions(
-    this.getBlock.bind(this),
-    1,
-    [Infinity, Infinity, Infinity],
-    [-Infinity, -Infinity, -Infinity]
-  )
-  
+
   this.timer = this.initializeTimer((opts.tickFPS || 16))
   this.paused = false
 
-  this.spatial = new SpatialEventEmitter
+  this.spatial = new SpatialEventEmitter()
   this.region = regionChange(this.spatial, aabb([0, 0, 0], [1, 1, 1]), this.chunkSize)
   this.voxelRegion = regionChange(this.spatial, 1)
   this.chunkRegion = regionChange(this.spatial, this.chunkSize)
@@ -141,12 +145,12 @@ function Game(opts) {
   this.chunksNeedsUpdate = {}
   // contains new chunks yet to be generated. Handled by game.loadPendingChunks
   this.pendingChunks = []
-  
+
   if (this.isClient) {
     if (opts.exposeGlobal) window.game = window.g = this
-  }
+      }
 
- 
+
   self.chunkRegion.on('change', function(newChunk) {
     self.removeFarChunks()
   })
@@ -157,9 +161,42 @@ function Game(opts) {
   // materials
   if ('materials' in opts) throw new Error('opts.materials replaced with voxel-registry registerBlock()') // TODO: bridge?
  
-  //this.paused = true // TODO: should it start paused, then unpause when pointer lock is acquired?
+  // physics setup
+  var blockGetter = this.getBlock.bind(this)
+  this.physics = createPhysEngine(opts, blockGetter)
 
-  this.initializeControls(opts)
+
+
+  this.playerEntity = initPlayerEntity( this )
+
+  // accessors for player - TODO: reconsider?
+  this.playerPosition = function() {
+    return this.playerEntity.getPosition()
+  }
+
+
+  // input related setup 
+
+  this.inputs = createInputs(this,opts)
+  //  (hopefully temporary) redirects to input funcitons
+  this.onFire = function(state) { this.inputs.tempOnFire(state) }
+  this.buttons = this.inputs.tempGetButtons()
+  // Input-related removal warnings:
+  Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
+
+
+
+  // hookup physics controls
+  this.controller = createController(opts, this.buttons)
+  this.controller.setTarget(this.playerEntity.body)
+  var c = this.rendering.camera
+  var camAccessor = {
+    getRotationXY: function() { return [ c.rotationX, c.rotationY ] },
+    setRotationXY: function(x,y) { c.rotationX = x; c.rotationY = y }
+  }
+  this.controller.setCameraAccessor(camAccessor)
+
+
 
   // setup plugins
   var pluginOpts = opts.pluginOpts || {}
@@ -168,27 +205,22 @@ function Game(opts) {
     pluginOpts[name] = pluginOpts[name] || BUILTIN_PLUGIN_OPTS[name]
   }
 
-  for (var name in pluginOpts) {
-    plugins.add(name, pluginOpts[name])
+  for (var name2 in pluginOpts) {
+    plugins.add(name2, pluginOpts[name2])
   }
   plugins.loadAll()
 
 
   // textures loaded, now can render chunks
-  this.stitcher = plugins.get('voxel-stitch')
-  this.stitcher.on('updatedSides', function() {
-    if (self.generateChunks) self.handleChunkGeneration()
-    self.showAllChunks()
 
-    // TODO: fix async chunk gen, loadPendingChunks() may load 1 even if this.pendingChunks empty
-    setTimeout(function() {
-      self.asyncChunkGeneration = 'asyncChunkGeneration' in opts ? opts.asyncChunkGeneration : true
-    }, 2000)
-  })
-  this.mesherPlugin = plugins.get('voxel-mesher')
 
-  this.cameraPlugin = plugins.get('game-shell-fps-camera') // TODO: support other plugins implementing same API
+  this.rendering.setStitcherPlugin( plugins.get('voxel-stitch'), opts )
+  this.rendering.setMesherPlugin( plugins.get('voxel-mesher') )
+  // TODO: support other plugins implementing same API
 
+  // rendering-related removal warnings..
+  Object.defineProperty(this, 'mesherPlugin', {get:function() { throw new Error('voxel-engine "mesherPlugin" property removed') }})
+  Object.defineProperty(this, 'stitcher', {get:function() { throw new Error('voxel-engine "stitcher" property removed') }})
 
 }
 
@@ -206,79 +238,109 @@ Game.prototype.voxelPosition = function(gamePosition) {
   return v
 }
 
-var _position = new Array(3)
-Game.prototype.cameraPosition = function() {
-  if (this.cameraPlugin) {
-    this.cameraPlugin.getPosition(_position)
+
+
+
+/*
+ *    ENTITY MANAGEMENT
+*/
+
+
+Game.prototype.addEntity = function(data, aabb, offset, mesh, tickFn) {
+  var body
+  if (aabb) {
+    body = this.physics.addBody( data, aabb )
   }
-
-  return _position
+  var e = createEntity(data, body, offset, mesh, tickFn)
+  this.entities.push(e)
+  return e
 }
 
-var _cameraVector = vector.create()
-Game.prototype.cameraVector = function() {
-  if (this.cameraPlugin) {
-    this.cameraPlugin.getVector(_cameraVector)
-  }
-
-  return _cameraVector
-}
-
-Game.prototype.makePhysical = function(target, envelope, blocksCreation) {
-  var vel = this.terminalVelocity
-  envelope = envelope || [2/3, 1.5, 2/3]
-  var obj = physical(target, this.potentialCollisionSet(), envelope, {x: vel[0], y: vel[1], z: vel[2]})
-  obj.blocksCreation = !!blocksCreation
-  return obj
-}
-
-Game.prototype.addItem = function(item) {
-  if (!item.tick) {
-    var newItem = physical(
-      item.mesh,
-      this.potentialCollisionSet(),
-      [item.size, item.size, item.size]
-    )
-    
-    if (item.velocity) {
-      newItem.velocity.copy(item.velocity)
-      newItem.subjectTo(this.gravity)
-    }
-    
-    newItem.repr = function() { return 'debris' }
-    newItem.mesh = item.mesh
-    newItem.blocksCreation = item.blocksCreation
-    
-    item = newItem
-  }
-  
-  this.items.push(item)
-  if (item.mesh) this.scene.add(item.mesh)
-  return this.items[this.items.length - 1]
-}
-
-Game.prototype.removeItem = function(item) {
-  var ix = this.items.indexOf(item)
+Game.prototype.removeEntity = function(e) {
+  var ix = this.entities.indexOf(e)
   if (ix < 0) return
-  this.items.splice(ix, 1)
-  if (item.mesh) this.scene.remove(item.mesh)
+  if (e.body) this.physics.removeBody(e.body)
+  this.entities.splice(ix, 1)
 }
+
+
+
+// player entity creation
+
+function initPlayerEntity(game) {
+  // options ad-hoc for now..
+  var playerW = 0.7
+  var playerH = 1.6
+  var paabb = new aabb( [ 0, 20, 0], [ playerW, playerH, playerW ] )
+  var offset = vec3.fromValues( playerW/2, 0, playerW/2 )
+
+  // create an avatar with references to the camera..
+  var data = {
+    cam: game.rendering.camera,
+    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
+  }
+
+  // tick function references game's camera object and updates it
+  var tick = function(dt) {
+    var camPos = vec3.create()
+    vec3.add( camPos, this.body.aabb.base, this.data.camOffset )
+    // basic-camera uses inverse coords for some reason
+    vec3.scale( camPos, camPos, -1 )
+    this.data.cam.position = camPos
+  }
+
+  return game.addEntity( data, paabb, offset, null, tick )
+
+
+  //  var body = this.physics.addBody( avatar, paabb, true )
+  //  
+  //  // entity (item) to house player values, tick function
+  //  var p = {
+  //    body: body,
+  //    cam: this.rendering.camera,
+  //    posOffset: vec3.fromValues( playerW/2, 0, playerW/2 ),
+  //    camOffset: vec3.fromValues( playerW/2, playerH, playerW/2 )
+  //  }
+  //  p.getPosition = function() {
+  //    var pos = vec3.create()
+  //    return vec3.add( pos, this.body.aabb.base, this.posOffset )
+  //  }
+  //  p.getCamPosition = function() {
+  //    var pos = vec3.create()
+  //    return vec3.add( pos, this.body.aabb.base, this.camOffset )
+  //  }
+  //  p.tick = function(dt) {
+  //    var cpos = this.getCamPosition()
+  //    vec3.scale( cpos, cpos, -1 ) // camera uses inverse coords for some reason
+  //    this.cam.position = cpos
+  //  }
+  //  this.addItem(p)
+}
+
+
+
+
+
+
+
+
 
 // only intersects voxels, not items (for now)
 Game.prototype.raycast = // backwards compat
-Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) {
-  if (!start) return this.raycastVoxels(this.cameraPosition(), this.cameraVector(), 10)
-  
+  Game.prototype.raycastVoxels = function(start, direction, maxDistance, epilson) {
+  if (!start) return this.raycastVoxels(this.rendering.cameraPosition(), 
+                                        this.rendering.cameraVector(), 10)
+
   var hitNormal = [0, 0, 0]
   var hitPosition = [0, 0, 0]
-  var cp = start || this.cameraPosition()
-  var cv = direction || this.cameraVector()
+  var cp = start || this.rendering.cameraPosition()
+  var cv = direction || this.rendering.cameraVector()
   var hitBlock = ray(this, cp, cv, maxDistance || 10.0, hitPosition, hitNormal, epilson || this.epilson)
   if (hitBlock <= 0) return false
   var adjacentPosition = [0, 0, 0]
   var voxelPosition = this.voxelPosition(hitPosition)
-  vector.add(adjacentPosition, voxelPosition, hitNormal)
-  
+  vec3.add(adjacentPosition, voxelPosition, hitNormal)
+
   return {
     position: hitPosition,
     voxel: voxelPosition,
@@ -293,12 +355,12 @@ Game.prototype.canCreateBlock = function(pos) {
   pos = this.parseVectorArguments(arguments)
   var floored = pos.map(function(i) { return Math.floor(i) })
   var bbox = aabb(floored, [1, 1, 1])
-  
-  for (var i = 0, len = this.items.length; i < len; ++i) {
-    var item = this.items[i]
-    var itemInTheWay = item.blocksCreation && item.aabb && bbox.intersects(item.aabb())
-    if (itemInTheWay) return false
-  }
+
+  //  for (var i = 0, len = this.items.length; i < len; ++i) {
+  //    var item = this.items[i]
+  //    var itemInTheWay = item.blocksCreation && item.aabb && bbox.intersects(item.aabb())
+  //    if (itemInTheWay) return false
+  //  }
 
   return true
 }
@@ -337,49 +399,25 @@ Game.prototype.blockPosition = function(pos) {
 Game.prototype.blocks = function(low, high, iterator) {
   var l = low, h = high
   var d = [ h[0]-l[0], h[1]-l[1], h[2]-l[2] ]
-  if (!iterator) var voxels = new this.arrayType(d[0]*d[1]*d[2])
+  var voxels
+  if (!iterator) voxels = new this.arrayType(d[0]*d[1]*d[2])
   var i = 0
   for(var z=l[2]; z<h[2]; ++z)
-  for(var y=l[1]; y<h[1]; ++y)
-  for(var x=l[0]; x<h[0]; ++x, ++i) {
-    if (iterator) iterator(x, y, z, i)
-    else voxels[i] = this.voxels.voxelAtPosition([x, y, z])
-  }
+    for(var y=l[1]; y<h[1]; ++y)
+      for(var x=l[0]; x<h[0]; ++x, ++i) {
+        if (iterator) iterator(x, y, z, i)
+        else voxels[i] = this.voxels.voxelAtPosition([x, y, z])
+          }
   if (!iterator) return {voxels: voxels, dims: d}
-}
+    }
 
 // backwards compat
 Game.prototype.createAdjacent = function(hit, val) {
   this.createBlock(hit.adjacent, val)
 }
 
-Game.prototype.appendTo = function (element) {
-  // no-op; game-shell to append itself
-}
-
 // # Defaults/options parsing
 
-Game.prototype.gravity = [0, -0.0000036, 0]
-Game.prototype.friction = 0.3
-Game.prototype.epilson = 1e-8
-Game.prototype.terminalVelocity = [0.9, 0.1, 0.9]
-
-Game.prototype.defaultButtons = {
-  'W': 'forward'
-, 'A': 'left'
-, 'S': 'backward'
-, 'D': 'right'
-, '<up>': 'forward'
-, '<left>': 'left'
-, '<down>': 'backward'
-, '<right>': 'right'
-, '<mouse 1>': 'fire'
-, '<mouse 3>': 'firealt'
-, '<space>': 'jump'
-, '<shift>': 'crouch'
-, '<control>': 'alt'
-, '<tab>': 'sprint'
-}
 
 // used in methods that have identity function(pos) {}
 Game.prototype.parseVectorArguments = function(args) {
@@ -395,70 +433,7 @@ Game.prototype.setConfigurablePositions = function(opts) {
   this.worldOrigin = wo || [0, 0, 0]
 }
 
-Game.prototype.createContainer = function(opts) {
-  if (opts.container) return opts.container
 
-  // based on game-shell makeDefaultContainer()
-  var container = document.createElement("div")
-  container.tabindex = 1
-  container.style.position = "absolute"
-  container.style.left = "0px"
-  container.style.right = "0px"
-  container.style.top = "0px"
-  container.style.bottom = "0px"
-  container.style.height = "100%"
-  container.style.overflow = "hidden"
-  document.body.appendChild(container)
-  document.body.style.overflow = "hidden" //Prevent bounce
-  document.body.style.height = "100%"
-  return container
-}
-
-Game.prototype.setDimensions = function(opts) {
-  if (opts.container) this.container = opts.container
-  if (opts.container && opts.container.clientHeight) {
-    this.height = opts.container.clientHeight
-  } else {
-    this.height = typeof window === "undefined" ? 1 : window.innerHeight
-  }
-  if (opts.container && opts.container.clientWidth) {
-    this.width = opts.container.clientWidth
-  } else {
-    this.width = typeof window === "undefined" ? 1 : window.innerWidth
-  }
-}
-
-Game.prototype.notCapable = function(opts) {
-  var self = this
-  if( !Detector().webgl ) {
-    if (!this.reportedNotCapable) document.body.appendChild(self.notCapableMessage())
-    this.reportedNotCapable = true // only once
-    return true
-  }
-  return false
-}
-
-Game.prototype.notCapableMessage = function() {
-  var wrapper = document.createElement('div')
-  wrapper.className = "errorMessage"
-  var a = document.createElement('a')
-  a.title = "You need WebGL and Pointer Lock (Chrome 23/Firefox 14) to play this game. Click here for more information."
-  a.innerHTML = a.title
-  a.href = "http://get.webgl.org"
-  wrapper.appendChild(a)
-  return wrapper
-}
-
-// # Physics/collision related methods
-
-Game.prototype.control = function(target) {
-  this.controlling = target
-  return this.controls.target(target)
-}
-
-Game.prototype.potentialCollisionSet = function() {
-  return [{ collide: this.collideTerrain.bind(this) }]
-}
 
 /**
  * Get the position of the player under control.
@@ -469,43 +444,24 @@ Game.prototype.potentialCollisionSet = function() {
  */
 
 Game.prototype.playerPosition = function() {
-  var target = this.controls.target()
-  if (!target) return this.cameraPosition()
-  var position = target.avatar.position
-  return [position.x, position.y, position.z]
+  return this.getPlayerPosition()
+  //  var target = this.controls.target()
+  //  if (!target) return this.rendering.cameraPosition()
+  //  var position = target.avatar.position
+  //  return [position.x, position.y, position.z]
 }
 
-Game.prototype.playerAABB = function(position) {
-  var pos = position || this.playerPosition()
-  var lower = []
-  var upper = [1/2, this.playerHeight, 1/2]
-  var playerBottom = [1/4, this.playerHeight, 1/4]
-  vector.subtract(lower, pos, playerBottom)
-  var bbox = aabb(lower, upper)
-  return bbox
-}
+//Game.prototype.playerAABB = function(position) {
+//  var pos = position || this.playerPosition()
+//  var lower = []
+//  var upper = [1/2, this.playerHeight, 1/2]
+//  var playerBottom = [1/4, this.playerHeight, 1/4]
+//  vec3.subtract(lower, pos, playerBottom)
+//  var bbox = aabb(lower, upper)
+//  return bbox
+//}
 
-Game.prototype.collideTerrain = function(other, bbox, vec, resting) {
-  var self = this
-  this.collideVoxels(bbox, vec, function hit(axis, tile, coords, dir, edge) {
-    if (!tile) return
-    if (Math.abs(vec[axis]) < Math.abs(edge)) return
-    vec[axis] = edge
-    other.acceleration[axis] = 0
-    resting[['x','y','z'][axis]] = dir // TODO: change to glm vec3 array?
-    other.friction[(axis + 1) % 3] = other.friction[(axis + 2) % 3] = axis === 1 ? self.friction  : 1
-    return true
-  })
-}
 
-// # Three.js specific methods
-
-Game.prototype.addStats = function() {
-  stats = new Stats()
-  stats.domElement.style.position  = 'absolute'
-  stats.domElement.style.bottom  = '0px'
-  document.body.appendChild( stats.domElement )
-}
 
 // # Chunk related methods
 
@@ -596,10 +552,10 @@ Game.prototype.loadPendingChunks = function(count) {
     var chunk = this.voxels.generateChunk(chunkPos[0]|0, chunkPos[1]|0, chunkPos[2]|0)
 
     if (this.isClient) this.showChunk(chunk)
-  }
+      }
 
   if (count) pendingChunks.splice(0, count)
-}
+    }
 
 Game.prototype.getChunkAtPosition = function(pos) {
   var chunkID = this.voxels.chunkAtPosition(pos).join('|')
@@ -625,8 +581,8 @@ var chunkDensity = function(chunk) {
   }
 
   var densities = {}
-  for (var val in counts) {
-    densities[val] = counts[val] / length
+  for (var val2 in counts) {
+    densities[val2] = counts[val2] / length
   }
   return densities
 }
@@ -639,7 +595,8 @@ Game.prototype.showChunk = function(chunk, optionalPosition) {
   //console.log('showChunk',chunkIndex,'density=',JSON.stringify(chunkDensity(chunk)))
 
   var voxelArray = isndarray(chunk) ? chunk : ndarray(chunk.voxels, chunk.dims)
-  var mesh = this.mesherPlugin.createVoxelMesh(this.shell.gl, voxelArray, this.stitcher.voxelSideTextureIDs, this.stitcher.voxelSideTextureSizes, chunk.position, this.chunkPad)
+  var mesh = this.rendering.stitchVoxelMesh( this.shell.gl, voxelArray, chunk.position, this.chunkPad)
+  // TODO: should the above API be on game.renderer or with data management?
 
   if (!mesh) {
     // no voxels
@@ -659,52 +616,43 @@ Game.prototype.showChunk = function(chunk, optionalPosition) {
 
 // # Debugging methods
 
-Game.prototype.addMarker = function(position) {
-  throw new Error('voxel-engine addMarker not yet implemented TODO: figure out how to fit this into the rendering pipeline')
-}
-
-Game.prototype.addAABBMarker = function(aabb, color) {
-  throw new Error('voxel-engine addAABBMarker not yet implemented TODO')
-}
-
-Game.prototype.addVoxelMarker = function(x, y, z, color) {
-  var bbox = aabb([x, y, z], [1, 1, 1])
-  return this.addAABBMarker(bbox, color)
-}
-
 Game.prototype.pin = pin
 
 // # Misc internal methods
-
-Game.prototype.onFire = function(state) {
-  this.emit('fire', this.controlling, state)
-}
 
 Game.prototype.setInterval = tic.interval.bind(tic)
 Game.prototype.setTimeout = tic.timeout.bind(tic)
 
 Game.prototype.tick = function(delta) {
-  for(var i = 0, len = this.items.length; i < len; ++i) {
-    this.items[i].tick(delta)
+
+  // TODO: revisit timing
+  // for now, highly variable timesteps are Considered Harmful
+  if (delta > 200) delta = 200
+
+  this.controller.tick(delta)
+
+  this.physics.tick(delta)
+
+  // tick entities
+  for(var i=0; i<this.entities.length; ++i) {
+    if (this.entities[i].tick) {
+      this.entities[i].tick()
+    }
   }
-  
+
   //if (this.materials) this.materials.tick(delta)
 
   if (this.pendingChunks.length) this.loadPendingChunks()
   if (Object.keys(this.chunksNeedsUpdate).length > 0) this.updateDirtyChunks()
-  
+
   tic.tick(delta)
 
   this.emit('tick', delta)
-  
-  //if (!this.controls) return // this.controls removed; still load chunks
+
   var playerPos = this.playerPosition()
   this.spatial.emit('position', playerPos, playerPos)
 }
 
-Game.prototype.render = function(delta) {
-  this.view.render(this.scene)
-}
 
 // TODO: merge with game-shell render loop?
 Game.prototype.initializeTimer = function(rate) {
@@ -714,11 +662,11 @@ Game.prototype.initializeTimer = function(rate) {
   var last = null
   var dt = 0
   var wholeTick
-  
+
   self.frameUpdated = true
   self.interval = setInterval(timer, 0)
   return self.interval
-  
+
   function timer() {
     if (self.paused) {
       last = Date.now()
@@ -733,67 +681,14 @@ Game.prototype.initializeTimer = function(rate) {
     wholeTick = ((accum / rate)|0)
     if (wholeTick <= 0) return
     wholeTick *= rate
-    
+
     self.tick(wholeTick)
     accum -= wholeTick
-    
+
     self.frameUpdated = true
   }
 }
 
-// Create the buttons state object (binding => state), proxying to game-shell .wasDown(binding)
-Game.prototype.proxyButtons = function() {
-  var self = this
-
-  self.buttons = {}
-
-  Object.keys(this.shell.bindings).forEach(function(name) {
-    Object.defineProperty(self.buttons, name, {get:
-      function() {
-        return self.shell.pointerLock && self.shell.wasDown(name)
-      }
-    })
-  })
-}
-
-// cleanup key name - based on https://github.com/mikolalysenko/game-shell/blob/master/shell.js
-var filtered_vkey = function(k) {
-  if(k.charAt(0) === '<' && k.charAt(k.length-1) === '>') {
-    k = k.substring(1, k.length-1)
-  }
-  k = k.replace(/\s/g, "-")
-  return k
-}
-
-Game.prototype.initializeControls = function(opts) {
-  // player control - game-shell handles most controls now
-
-  // initial keybindings passed in from options
-  Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
-  var keybindings = opts.keybindings || this.defaultButtons
-  for (var key in keybindings) {
-    var name = keybindings[key]
-
-    // translate name for game-shell
-    key = filtered_vkey(key)
-
-    this.shell.bind(name, key)
-  }
-
-  Object.defineProperty(this, 'interact', {get:function() { throw new Error('voxel-engine "interact" property removed') }})
-
-  this.proxyButtons() // sets this.buttons TODO: refresh when shell.bindings changes (bind/unbind)
-  this.hookupControls(this.buttons, opts)
-}
-
-Game.prototype.hookupControls = function(buttons, opts) {
-  opts = opts || {}
-  opts.controls = opts.controls || {}
-  opts.controls.onfire = this.onFire.bind(this)
-  this.controls = control(buttons, opts.controls)
-  this.items.push(this.controls)
-  this.controlling = null
-}
 
 Game.prototype.handleChunkGeneration = function() {
   var self = this
