@@ -24,7 +24,7 @@
     "underscore": "^1.7.0",
     "spatial-events": "^1.1.0",
     "tic": "^0.2.1",
-    "voxel": "git://github.com/deathcap/voxel.git#2a92d917199aedc89267c60eb0687d3472a7ce2f",
+    "voxel": "^0.5.0",
     "voxel-fps-controller": "^0.1.0",
     "voxel-mesher": "^0.14.0",
     "voxel-physics-engine": "^0.2.0",
