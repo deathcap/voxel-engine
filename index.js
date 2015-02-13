@@ -13,6 +13,7 @@ var tic = require('tic')()
 var ndarray = require('ndarray')
 var isndarray = require('isndarray')
 var throttle = require('underscore').throttle // TODO: remove underscore dependency
+var obsolete = require('obsolete')
 
 var createPlugins = require('voxel-plugins')
 var extend = require('extend')
@@ -55,9 +56,9 @@ function Game(opts) {
   this.generateChunks = opts.generateChunks
   this.setConfigurablePositions(opts)
   this.configureChunkLoading(opts)
-  Object.defineProperty(this, 'THREE', {get:function() { throw new Error('voxel-engine "THREE property removed') }})
-  Object.defineProperty(this, 'vector', {get:function() { throw new Error('voxel-engine "vector" property removed') }})
-  Object.defineProperty(this, 'glMatrix', {get:function() { throw new Error('voxel-engine "glMatrix" property removed') }})
+  obsolete(this, 'THREE')
+  obsolete(this, 'vector')
+  obsolete(this, 'glMatrix')
   this.vec3 = vec3
   this.arrayType = opts.arrayType || {1:Uint8Array, 2:Uint16Array, 4:Uint32Array}[opts.arrayTypeSize] || Uint8Array
   this.cubeSize = 1 // backwards compat
@@ -75,17 +76,17 @@ function Game(opts) {
   this.rendering = createRendering(this, opts)
 
   // warn about many removed or NYI rendering properties:
-  Object.defineProperty(this, 'mesher', {get:function() { throw new Error('voxel-engine "mesher" property removed') }})
-  Object.defineProperty(this, 'scene', {get:function() { throw new Error('voxel-engine "scene" property removed') }})
-  Object.defineProperty(this, 'view', {get:function() { throw new Error('voxel-engine "view" property removed') }})
-  Object.defineProperty(this, 'camera', {get:function() { throw new Error('voxel-engine "camera" property removed') }})
-  Object.defineProperty(this, 'render', {get:function() { throw new Error('voxel-engine "render" method removed') }})
-  Object.defineProperty(this, 'addMarker', {get:function() { throw new Error('voxel-engine "addMarker" is NYI') }})
-  Object.defineProperty(this, 'addAABBMarker', {get:function() { throw new Error('voxel-engine "addAABBMarker" is NYI') }})
-  Object.defineProperty(this, 'addVoxelMarker', {get:function() { throw new Error('voxel-engine "addVoxelMarker" is NYI') }})
-  Object.defineProperty(this, 'skyColor', {get:function() { throw new Error('voxel-engine "skyColor" has moved into rendering module') }})
-  Object.defineProperty(this, 'antialias', {get:function() { throw new Error('voxel-engine "antialias" has moved into rendering module') }})
-  Object.defineProperty(this, 'meshType', {get:function() { throw new Error('voxel-engine "meshType" has moved into rendering module') }})
+  obsolete(this, 'mesher')
+  obsolete(this, 'scene')
+  obsolete(this, 'view')
+  obsolete(this, 'camera')
+  obsolete(this, 'render')
+  obsolete(this, 'addMarker')
+  obsolete(this, 'addAABBMarker')
+  obsolete(this, 'addVoxelMarker')
+  obsolete(this, 'skyColor')
+  obsolete(this, 'antialias')
+  obsolete(this, 'meshType')
 
   // redirects for game properties (TODO: remove/abstract these)
   this.cameraPosition = this.rendering.cameraPosition.bind(this.rendering)
@@ -111,13 +112,13 @@ function Game(opts) {
   this.shell = this.container.getShell()
 
   //  container-related removal warnings:
-  Object.defineProperty(this, 'setDimensions', {get:function() { throw new Error('voxel-engine "setDimensions" removed') }})
-  Object.defineProperty(this, 'createContainer', {get:function() { throw new Error('voxel-engine "createContainer" moved to container module') }})
-  Object.defineProperty(this, 'appendTo', {get:function() { throw new Error('voxel-engine "appendTo" moved to container module') }})
-  Object.defineProperty(this, 'notCapable', {get:function() { throw new Error('voxel-engine "notCapable" moved to container module') }})
-  Object.defineProperty(this, 'notCapableMessage', {get:function() { throw new Error('voxel-engine "notCapableMessage" moved to container module') }})
-  Object.defineProperty(this, 'height', {get:function() { throw new Error('voxel-engine "height" removed') }})
-  Object.defineProperty(this, 'width', {get:function() { throw new Error('voxel-engine "width" removed') }})
+  obsolete(this, 'setDimensions')
+  obsolete(this, 'createContainer', 'moved to container module')
+  obsolete(this, 'appendTo', 'moved to container module')
+  obsolete(this, 'notCapable', 'moved to container module')
+  obsolete(this, 'notCapableMessage', 'moved to contaier module')
+  obsolete(this, 'height')
+  obsolete(this, 'width')
 
 
   // setup plugins
@@ -182,7 +183,7 @@ function Game(opts) {
   this.onFire = throttle(function(state) { this.inputs.tempOnFire(state) }, opts.frequency || 100)
   this.buttons = this.inputs.tempGetButtons()
   // Input-related removal warnings:
-  Object.defineProperty(this, 'keybindings', {get:function() { throw new Error('voxel-engine "keybindings" property removed') }})
+  obsolete(this, 'keybindings')
 
 
 
@@ -219,8 +220,8 @@ function Game(opts) {
   // TODO: support other plugins implementing same API
 
   // rendering-related removal warnings..
-  Object.defineProperty(this, 'mesherPlugin', {get:function() { throw new Error('voxel-engine "mesherPlugin" property removed') }})
-  Object.defineProperty(this, 'stitcher', {get:function() { throw new Error('voxel-engine "stitcher" property removed') }})
+  obsolete(this, 'mesherPlugin')
+  obsolete(this, 'stitcher')
 
 }
 
