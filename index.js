@@ -12,7 +12,7 @@ var regionChange = require('voxel-region-change')
 var tic = require('tic')()
 var ndarray = require('ndarray')
 var isndarray = require('isndarray')
-var throttle = require('underscore').throttle // TODO: remove underscore dependency
+var throttle = require('lodash.throttle')
 var obsolete = require('obsolete')
 
 var createPlugins = require('voxel-plugins')
